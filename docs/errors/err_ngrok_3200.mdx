@@ -1,20 +1,78 @@
----
-hide_table_of_contents: true
-displayed_sidebar: docs
----
+import sqlite3
+import requests
+import json
+from flask import Flask, request
 
-import { InlineCode } from "@ngrok/mantle/inline-code";
-import ErrorDetails from "/src/components/ErrorDetails";
-import { EndpointUrlOrigin } from "/src/components/search-params-endpoint-url";
+# Token va API URL
+TOKEN = "AAGZN7R3eIL3CByCtTvY4aQGMRWIaBj-_H4"
+API_URL = f"https://hovala_pulrobot{TOKEN}/"
 
-# ERR_NGROK_3200
+# Flask ilovasini yaratish
+app = Flask(__name__)
 
-### Message
+# Ma'lumotlar bazasini yaratish
+conn = sqlite3.connect("referrals.db", check_same_thread=False)
+cursor = conn.cursor()
+cursor.execute('''CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY, 
+    invited_by INTEGER, 
+    invite_count INTEGER DEFAULT 0
+)''')
+conn.commit()
 
-The endpoint <InlineCode><EndpointUrlOrigin fallback="HOSTNAME" /></InlineCode> is offline.
+def send_request(method, data):
+    """Telegram API orqali so'rov yuborish"""
+    url = API_URL + method
+    headers = {"Content-Type": "application/json"}
+    response = requests.post(url, headers=headers, data=json.dumps(data))
+    return response.json()
 
-<ErrorDetails error="err_ngrok_3200" />
+@app.route("/", methods=["POST"])
+def receive_update():
+    """Telegram webhookdan kelgan ma'lumotlarni qayta ishlash"""
+    update = request.get_json()
+    if not update or "message" not in update:
+        return "", 400
 
-### Further help
+    message = update["message"]
+    chat_id = message["chat"]["id"]
+    user_id = message["from"]["id"]
+    text = message.get("text", "")
 
-If you're having trouble resolving this error, please reach out to [support@ngrok.com](mailto:support@ngrok.com?subject=Help%20with%20ERR_NGROK_3200)
+    if text.startswith("/start"):
+        cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+        result = cursor.fetchone()
+
+        if not result:
+            args = text.split()
+            invited_by = int(args[1]) if len(args) > 1 and args[1].isdigit() else None
+
+            cursor.execute("INSERT INTO users (user_id, invited_by) VALUES (?, ?)", (user_id, invited_by))
+            conn.commit()
+
+            if invited_by:
+                cursor.execute("UPDATE users SET invite_count = invite_count + 1 WHERE user_id = ?", (invited_by,))
+                conn.commit()
+                send_request("sendMessage", {"chat_id": invited_by, "text": "🎉 Sizga +1 ta do‘st qo‘shildi!"})
+
+        bot_username = "Hovala_pulrobot"
+        ref_link = f"https://t.me/{bot_username}?start={user_id}"
+        send_request("sendMessage", {
+            "chat_id": chat_id,
+            "text": f"👋 Salom, {message['from']['first_name']}!\n\nSizning referal havolangiz:\n{ref_link}\n\n20 ta odam taklif qilib, mukofotga ega bo‘ling!"
+        })
+    
+    elif text == "/mystats":
+        cursor.execute("SELECT invite_count FROM users WHERE user_id = ?", (user_id,))
+        result = cursor.fetchone()
+        invite_count = result[0] if result else 0
+
+        if invite_count >= 20:
+            send_request("sendMessage", {"chat_id": chat_id, "text": f"🎉 Tabriklaymiz! Siz {invite_count} ta odam taklif qildingiz va mukofot olish huquqiga egasiz!"})
+        else:
+            send_request("sendMessage", {"chat_id": chat_id, "text": f"📊 Siz {invite_count}/20 ta odamni taklif qildingiz. Yana {20 - invite_count} ta odam kerak!"})
+    
+    return "", 200
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
