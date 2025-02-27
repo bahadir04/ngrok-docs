@@ -1,20 +1,19 @@
----
-hide_table_of_contents: true
-displayed_sidebar: docs
----
+from flask import Flask, request
+import requests
 
-import { InlineCode } from "@ngrok/mantle/inline-code";
-import ErrorDetails from "/src/components/ErrorDetails";
-import { EndpointUrlOrigin } from "/src/components/search-params-endpoint-url";
+app = Flask(__name__)
 
-# ERR_NGROK_3200
+bot_token = "7793588026:AAGZN7R3eIL3CByCtTvY4aQGMRWIaBj-_H4"
+API_URL = f"https://api.telegram.org/bot{bot_token}/"
 
-### Message
+@app.route("/", methods=["POST"])
+def handle_update():
+    update = request.json
+    if "message" in update:
+        chat_id = update["message"]["chat"]["id"]
+        text = update["message"]["text"]
+        requests.post(API_URL + "sendMessage", json={"chat_id": chat_id, "text": "Salom! Bot ishlayapti!"})
+    return "OK"
 
-The endpoint <InlineCode><EndpointUrlOrigin fallback="HOSTNAME" /></InlineCode> is offline.
-
-<ErrorDetails error="err_ngrok_3200" />
-
-### Further help
-
-If you're having trouble resolving this error, please reach out to [support@ngrok.com](mailto:support@ngrok.com?subject=Help%20with%20ERR_NGROK_3200)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
